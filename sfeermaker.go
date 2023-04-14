@@ -1,60 +1,97 @@
 package main
 
 import (
-    "flag"
     "fmt"
+    "log"
+    "os"
     "time"
 
-    "github.com/studioimaginaire/go.hue"
+    "github.com/joho/godotenv"
+    "github.com/nathanwinther/go-hue/pkg/hue"
 )
 
 type LightScheme struct {
-    LightID     int
-    Brightness  uint8
-    Hue         uint16
-    Saturation  uint8
+    Name       string
+    LightID    int
+    Brightness uint8
+    Hue        uint16
+    Saturation uint8
 }
 
-var (
-    bridgeIP   = flag.String("bridgeIP", "", "The IP address of the Philips Hue Bridge")
-    username   = flag.String("username", "", "The username used to authenticate with the Philips Hue Bridge")
-    lightSchemes = map[string]LightScheme{
-        "morning": {"light_id": 1, "brightness": 100, "hue": 46920, "saturation": 254},
-        "evening": {"light_id": 1, "brightness": 100, "hue": 14910, "saturation": 254},
-    }
-)
-
-func setLight(client *hue.Client, light LightScheme) {
-    state := hue.LightState{
-        On:         true,
-        Bri:        light.Brightness,
-        Hue:        light.Hue,
-        Saturation: light.Saturation,
-    }
-    _, err := client.SetLightState(light.LightID, state)
-    if err != nil {
-        fmt.Println("Error setting light state:", err)
-    }
+type Config struct {
+    BridgeIP    string
+    BridgeUser  string
+    LightSchemes []LightScheme
 }
 
 func main() {
-    flag.Parse()
+    // Load configuration from .env file
+    err := godotenv.Load()
+    if err != nil {
+        log.Fatal("Error loading .env file")
+    }
+    cfg := Config{
+        BridgeIP:   os.Getenv("BRIDGE_IP"),
+        BridgeUser: os.Getenv("BRIDGE_USER"),
+        LightSchemes: []LightScheme{
+            {
+                Name:       "morning",
+                LightID:    1,
+                Brightness: 254,
+                Hue:        46920,
+                Saturation: 254,
+            },
+            {
+                Name:       "evening",
+                LightID:    1,
+                Brightness: 254,
+                Hue:        14910,
+                Saturation: 254,
+            },
+        },
+    }
 
-    client := hue.NewClient(*bridgeIP, *username)
+    // Connect to the Hue bridge
+    bridge := hue.NewBridge(cfg.BridgeIP, cfg.BridgeUser)
 
+    // Set up the light schemes
+    for _, scheme := range cfg.LightSchemes {
+        err := bridge.SetLightScheme(scheme.Name, scheme.LightID, scheme.Brightness, scheme.Hue, scheme.Saturation)
+        if err != nil {
+            log.Fatalf("Error setting up light scheme %s: %s", scheme.Name, err)
+        }
+    }
+
+    // Start the loop to check the time and adjust the lights accordingly
     for {
-        current_time := time.Now().Format("15:04")
-        if current_time >= "06:00" && current_time < "08:00" {
-            setLight(client, lightSchemes["morning"])
-        } else if current_time >= "21:00" || current_time < "06:00" {
-            setLight(client, lightSchemes["evening"])
-        } else {
-            _, err := client.SetLightState(1, hue.LightState{On: false})
+        current_time := time.Now().Format("15:04:05")
+        if isBetween(current_time, "06:00:00", "08:00:00") {
+            err := bridge.SetLightSchemeByName("morning")
             if err != nil {
-                fmt.Println("Error setting light state:", err)
+                log.Fatalf("Error setting light scheme 'morning': %s", err)
+            }
+        } else if isBetween(current_time, "21:00:00", "23:59:59") || isBetween(current_time, "00:00:00", "06:00:00") {
+            err := bridge.SetLightSchemeByName("evening")
+            if err != nil {
+                log.Fatalf("Error setting light scheme 'evening': %s", err)
+            }
+        } else {
+            err := bridge.SetLightState(1, false)
+            if err != nil {
+                log.Fatalf("Error turning off light: %s", err)
             }
         }
 
-        time.Sleep(60 * time.Second)
+        // Sleep for one minute
+        time.Sleep(time.Minute)
     }
+}
+
+// isBetween checks if a given time is between two other times (inclusive)
+func isBetween(t, start, end string) bool {
+    layout := "15:04:05"
+    t1, _ := time.Parse(layout, t)
+    s, _ := time.Parse(layout, start)
+    e, _ := time.Parse(layout, end)
+    return t1.After(s) && t1.Before(e) || t == start || t == end
 }
