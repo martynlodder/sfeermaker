@@ -1,44 +1,60 @@
-import datetime
-import time
-from phue import Bridge
+package main
 
-# Hier importeren we de benodigde modules. We hebben datetime nodig om de tijd te bepalen en time om te wachten tussen de tijden door. De phue module is nodig om met de Philips Hue Bridge te verbinden.
+import (
+    "flag"
+    "fmt"
+    "time"
 
-# Configuratie van de Philips Hue Bridge
-bridge_ip = "192.168.1.2" # Het IP-adres van de Philips Hue Bridge
-username = "DitIsMijnUsername" # De gebruikersnaam waarmee we verbinding maken met de Philips Hue Bridge
-b = Bridge(bridge_ip, username) # Maak een verbinding met de Philips Hue Bridge
+    "github.com/studioimaginaire/go.hue"
+)
 
-# Instellen van de lichtsferen op basis van tijd
-light_schemes = {
-    "morning": {"light_id": 1, "brightness": 100, "hue": 46920, "saturation": 254},
-    "evening": {"light_id": 1, "brightness": 100, "hue": 14910, "saturation": 254}
+type LightScheme struct {
+    LightID     int
+    Brightness  uint8
+    Hue         uint16
+    Saturation  uint8
 }
 
-# Hier definiëren we een dictionary (light_schemes) die aangeeft welke lichtsfeer bij welke tijd hoort. We hebben hier twee tijden gedefinieerd, "morning" en "evening", en bij elke tijd aangegeven welk licht we willen laten branden en met welke kleur.
+var (
+    bridgeIP   = flag.String("bridgeIP", "", "The IP address of the Philips Hue Bridge")
+    username   = flag.String("username", "", "The username used to authenticate with the Philips Hue Bridge")
+    lightSchemes = map[string]LightScheme{
+        "morning": {"light_id": 1, "brightness": 100, "hue": 46920, "saturation": 254},
+        "evening": {"light_id": 1, "brightness": 100, "hue": 14910, "saturation": 254},
+    }
+)
 
-# Functie om de lichten te bedienen
-def set_light(light_id, brightness, hue, saturation):
-    """
-    Zet de verlichting aan met de opgegeven instellingen.
-    """
-    b.set_light(light_id, {
-        "on": True,
-        "bri": brightness,
-        "hue": hue,
-        "sat": saturation
-    })
+func setLight(client *hue.Client, light LightScheme) {
+    state := hue.LightState{
+        On:         true,
+        Bri:        light.Brightness,
+        Hue:        light.Hue,
+        Saturation: light.Saturation,
+    }
+    _, err := client.SetLightState(light.LightID, state)
+    if err != nil {
+        fmt.Println("Error setting light state:", err)
+    }
+}
 
-# Hier definiëren we een functie (set_light) die de lichten bedient met de opgegeven instellingen. Deze functie zal later worden gebruikt om de lichten in de juiste lichtsfeer te zetten.
+func main() {
+    flag.Parse()
 
-# Main
-while True:
-    current_time = datetime.datetime.now().time() # Bepaal de huidige tijd
-    if current_time >= datetime.time(6, 0) and current_time < datetime.time(8, 0): # Als het tussen 6:00 en 8:00 uur is, zet dan de lichten op "morning"
-        set_light(**light_schemes["morning"])
-    elif current_time >= datetime.time(21, 0) or current_time < datetime.time(6, 0)): # Als het na 21:00 uur is of voor 6:00 uur, zet dan de lichten op "evening"
-        set_light(**light_schemes["evening"])
-    else:
-        b.set_light(1, "on", False) # Anders zet het licht uit
+    client := hue.NewClient(*bridgeIP, *username)
 
-    time.sleep(60) # Wacht 60 seconden voordat we de tijd opnieuw controleren
+    for {
+        current_time := time.Now().Format("15:04")
+        if current_time >= "06:00" && current_time < "08:00" {
+            setLight(client, lightSchemes["morning"])
+        } else if current_time >= "21:00" || current_time < "06:00" {
+            setLight(client, lightSchemes["evening"])
+        } else {
+            _, err := client.SetLightState(1, hue.LightState{On: false})
+            if err != nil {
+                fmt.Println("Error setting light state:", err)
+            }
+        }
+
+        time.Sleep(60 * time.Second)
+    }
+}
